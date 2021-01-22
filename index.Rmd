@@ -1,0 +1,236 @@
+---
+title: "Estimation with non-linearly scaled interval responses in surveys"
+description: >
+  If a survey question asks about how much time the responder took to complete a task -- with the latent quantity of interest being "median task completion time" -- presenting options such as "5-15 minutes" and "1-2 days" (instead of freeform text fields) reduces cognitive load and makes analysis simpler (survey taker does not have option to omit units when answering). The proposed methodology enables accurate inference on the quantity of interest given the survey responses in the form of intervals.
+author:
+  - name: Demetri Pananos
+    url: https://dpananos.github.io/
+    affiliation: Western University
+    affiliation_url: https://www.uwo.ca/
+  - name: Mikhail Popov
+    url: https://mpopov.com/
+    affiliation: Wikimedia Foundation
+    affiliation_url: https://wikimediafoundation.org/
+date: "`r Sys.Date()`"
+output: distill::distill_article
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+## Setup
+
+```{r packages}
+library(tidyselect)
+library(tidyverse)
+library(cmdstanr)
+library(gt)
+library(ggplot2)
+library(ggdist)
+library(distributional)
+
+register_knitr_engine(override = FALSE)
+theme_set(theme_minimal(base_size = 12))
+```
+
+```{r time_scale_labeller}
+time_scale_labeller <- function(x) {
+  gsub("\\s0[dhms]", "", tolower(lubridate::seconds_to_period(x)))
+}
+# time_scale_labeller(c(3600, 3660, 3661))
+```
+
+## Data
+
+```{r samples-from-latent-dist, cache=TRUE}
+set.seed(3600)
+samples_from_latent_dist <- tibble(
+    x1 = pmin(pmax(rlnorm(100, 8, 2), 1), 14 * 3600)
+) %>%
+    mutate(
+        x2 = cut(
+            x1,
+            breaks = c(0, 60 * 5, 3600, 3600 * 6, 3600 * 12, 3600 * 14),
+            dig.lab = 5
+        ),
+        x3 = cut(
+            x1, # in seconds
+            breaks = c(0, 60 * 5, 3600, 3600 * 6, 3600 * 12, 3600 * 14),
+            labels = c("(0,5]", "(5,60]", "(60,360]", "[360,720]", "(720,840]") # in minutes
+        ),
+        x4 = cut(
+            x1, # in seconds
+            breaks = c(0, 60 * 5, 3600, 3600 * 6, 3600 * 12, 3600 * 14),
+            labels = c("0-5 minutes", "5-60 minutes", "1-6 hours", "6-12 hours", "12-14 hours")
+        )
+    )
+```
+```{r, layout="l-body-outset", fig.width=12, fig.height=6, fig.cap="Distribution of simulated task completion times, which are only observed as bins."}
+ggplot(samples_from_latent_dist) +
+    geom_histogram(aes(x = x1), bins = 30) +
+    scale_x_continuous(
+        "Time spent on completing task",
+        labels = function(x) time_scale_labeller(round(x)),
+        breaks = 60 * c(30, 60 * 2, 60 * 6, 60 * 12),
+        minor_breaks = NULL
+    ) +
+    labs(
+        y = NULL,
+        title = "Distribution of simulated task completion times"
+    )
+```
+```{r, fig.width=12, fig.height=6, fig.cap="Simulated responses to binned survey question, by binning the hidden-to-analyst simulated task completion times."}
+ggplot(samples_from_latent_dist) +
+    geom_bar(aes(x = x4, y = ..count../sum(..count..))) +
+    scale_y_continuous("Proportion of responses", labels = scales::percent_format(1)) +
+    labs(
+        x = "Time to complete task",
+        title = "Simulated responses to binned survey question"
+    )
+```
+
+```{r lognormal-bins, dependson='samples-from-latent-dist', cache=TRUE}
+lognormal_bins <- samples_from_latent_dist %>%
+    count(x2) %>%
+    mutate(
+      binned_samples = str_replace_all(x2, "\\[|\\]", "") %>%
+        str_replace_all("\\(|\\)", '')
+    ) %>% 
+    separate(binned_samples, c('left', 'right'), sep = ",")
+```
+
+```{r model-data, dependson='lognormal-bins', cache=TRUE}
+model_data <- list(
+    n = nrow(lognormal_bins),
+    edges = sort(
+      as.numeric(unique(c(lognormal_bins$left, lognormal_bins$right)))
+    ),
+    counts = lognormal_bins$n,
+    prior_mu_mean = 4.5,
+    prior_mu_sigma = 2
+)
+```
+```{r theta-true, dependson='model_data', cache=TRUE}
+theta_true <- with(model_data, {
+    e <- edges
+    e[1] <- 0
+    e[length(e)] <- Inf
+    plnorm(e[2:length(edges)], 8, 2) - plnorm(e[1:length(edges)-1], 8, 2)
+})
+```
+
+## Model
+
+```{cmdstan multinomial-model, output.var="multinomial_model", cache=TRUE}
+data {
+  int<lower=1> n;
+  vector[n+1] edges; // always one more edge than counts
+  int counts[n];
+
+  real prior_mu_mean;
+  real prior_mu_sigma;
+}
+parameters {
+  real mu;
+  real<lower=0> sigma;
+}
+transformed parameters {
+  simplex[n] theta;
+  real exp_mu; // median
+
+  theta[1] = lognormal_cdf(edges[2], mu, sigma);
+  for (i in 2:(n-1)) {
+    theta[i] = lognormal_cdf(edges[i+1], mu, sigma) - lognormal_cdf(edges[i], mu, sigma);
+  }
+
+  theta[n] = 1 - sum(theta[1:(n-1)]);
+  exp_mu = exp(mu);
+}
+model {
+    mu ~ normal(prior_mu_mean, prior_mu_sigma);
+    sigma ~ cauchy(0, 5);
+    counts ~ multinomial(theta);
+}
+
+```
+
+```{r, eval=FALSE, include=FALSE}
+multinomial_model <- cmdstan_model("multinomial_model_v2.stan")
+```
+
+## Results
+
+```{r multinomial-samples, dependson=c('multinomial-model', 'model-data'), cache=TRUE, results='hide'}
+multinomial_samples <- multinomial_model$sample(
+  model_data, chains = 12,
+  refresh = 0, show_messages = FALSE
+)
+```
+```{r posterior-summary, dependson='multinomial-samples', cache=TRUE}
+posterior_summary <- multinomial_samples$summary(
+  variables = c("mu", "sigma", "theta", "exp_mu")
+)
+```
+```{r model-draws-tidy, dependson='multinomial-samples', cache=TRUE}
+model_draws_tidy <- posterior::as_draws_df(
+  multinomial_samples$draws(variables = c("mu", "sigma", "theta", "exp_mu"))
+)
+```
+
+```{r, echo=FALSE}
+posterior_summary %>%
+    mutate(ci95 = case_when(
+        variable == "exp_mu" ~ sprintf("(%s, %s)", time_scale_labeller(round(q5)), time_scale_labeller(round(q95))),
+        TRUE ~ sprintf("(%.2f, %.2f)", q5, q95)
+    )) %>%
+    left_join(tibble(
+        variable = c("mu", "exp_mu", "sigma", sprintf("theta[%i]", 1:nrow(lognormal_bins))),
+        truth = c(8, exp(8), 2, theta_true)
+    ), by = "variable") %>%
+    select(variable, truth, median, ci95) %>%
+    gt(rowname_col = "variable") %>%
+    fmt_number(
+        columns = vars(truth, median),
+        decimals = 2
+    ) %>%
+    fmt(
+        columns = vars(truth, median),
+        rows = matches("exp_mu"),
+        fns = function(x) time_scale_labeller(round(x))
+    )
+```
+
+```{r, layout="l-body-outset", fig.width=12, fig.height=6, fig.cap="Cumulative distribution functions of latent distribution of task completion times, based on posterior draws of the parameters. Red curve represents the true latent lognormal distribution."}
+set.seed(42)
+model_draws_tidy %>%
+    sample_n(200) %>%
+    ggplot(aes(y = 0, color = "draw")) +
+    geom_vline(xintercept = exp(8), linetype = "dashed") +
+    stat_dist_slab(
+      aes(dist = "lnorm", arg1 = mu, arg2 = sigma),
+      fill = NA, slab_type = "cdf"
+    ) +
+    stat_dist_slab(
+      aes(dist = "lnorm", arg1 = 8, arg2 = 2),
+      fill = NA, slab_type = "cdf", color = "red", data = NULL
+    ) +
+    scale_color_manual(
+      name = NULL, values = c("draw" = rgb(0, 0, 0, 0.025)), guide = FALSE
+    ) +
+    scale_x_log10(
+        "T: time spent on completing task",
+        labels = function(x) time_scale_labeller(round(x)),
+        breaks = 60 * c(1, 5, 30, 60, 60 * 8, 60 * 24, 60 * 24 * 7),
+        minor_breaks = NULL
+    ) +
+    scale_y_continuous(
+        "Probability of a task completed in T time or faster",
+        labels = scales::percent_format(1),
+        breaks = c(0, 0.25, 0.5, 0.75, 1.0), minor_breaks = NULL
+    ) +
+    ggtitle(
+      "Cumulative distribution of task completion times",
+      "Based on posterior draws of lognormal model parameters"
+    )
+```
