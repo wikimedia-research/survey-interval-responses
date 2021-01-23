@@ -41,6 +41,26 @@ time_scale_labeller <- function(x) {
 # time_scale_labeller(c(3600, 3660, 3661))
 ```
 
+## Model Derivation
+
+Data from the instruments described above are, in essence, realizations from a multinomial distribution.  Let $\mathbf{y}_i$ be the count of respondents in bin $i = 1 \dots n$, and let $N = \sum \mathbf{y}_i$ be the total number of respondents.  Then, we can model the counts in each bin as
+
+$$ \mathbf{y} \sim \operatorname{Multinomial}(\boldsymbol{\theta}, N) $$ 
+
+where $\boldsymbol{\theta}_i$ is the probability of observing a response in bin $i$.  We assume that the measured phenomenon (in this case, time to task completion) is distributed according to density $f$ parameterized by $\boldsymbol{\phi}$, $f_{\boldsymbol{\phi}}$.  The elements of $\boldsymbol{\theta}$ can be computed using the cumulative distribution function (CDF) of $f_{\boldsymbol{\phi}}$, $F_{\boldsymbol{\phi}}$. Let $t_i$ be bin edge $i$. Then the elements of $\boldsymbol{\theta}$ are
+
+\begin{align}
+  \boldsymbol{\theta}_1 &= F_{\boldsymbol{\phi}}(t_2)\>,   \\
+  \boldsymbol{\theta}_2 &= F_{\boldsymbol{\phi}}(t_3) - F_{\boldsymbol{\phi}}( t_2) \>, \\
+                        &\vdots \\
+  \boldsymbol{\theta}_{n-1} &= F_{\boldsymbol{\phi}}(t_{n}) - F_{\boldsymbol{\phi}}( t_{n-1}) \>, \\
+  \boldsymbol{\theta}_{n} &= 1 - F_{\boldsymbol{\phi}}( t_{n}) \>.
+\end{align}
+
+The first and last elements of $\boldsymbol{\theta}$ are constructed to soak up additional observations which may fall below/above the smallest/largest bin in the case the survey designer has included limits which do not span the support of $f_{\boldsymbol{\phi}}$. The relation between $\boldsymbol{\theta}$ and the latent density $f_{\boldsymbol{\phi}}$ allows for estimation of $\boldsymbol{\phi}$ and our latent quantity of interest "median time to task completion" using Stan.
+
+
+
 ## Data
 
 ```{r samples-from-latent-dist, cache=TRUE}
