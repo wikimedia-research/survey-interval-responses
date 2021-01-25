@@ -373,3 +373,54 @@ income_counts %>%
 - Sensitivity analysis and diagnostics
   - Model misspecification
   - Competing model selection
+=======
+
+
+
+```{cmdstan multinomial-mixture-model, output.var="multinomial_mixture_model", cache=TRUE}
+data {
+  int<lower=1> n;
+  vector[n+1] edges; // always one more edge than counts
+  int counts[n];
+
+  real prior_mu_1_mean;
+  real prior_mu_1_sigma;
+  
+  real prior_mu_2_mean;
+  real prior_mu_2_sigma;
+  
+  real prior_p_a;
+  real prior_p_b;
+}
+parameters {
+  real mu_1;
+  real<lower=0> sigma_1;
+  
+  real mu_2;
+  real<lower=0> sigma_2;
+  
+  real<lower=0, upper=1> p;
+}
+transformed parameters {
+  simplex[n] theta;
+
+  theta[1] = p*lognormal_cdf(edges[2], mu_1, sigma_1) + (1-p)*lognormal_cdf(edges[2], mu_1, sigma_1);
+  for (i in 2:(n-1)) {
+    theta[i] = p*lognormal_cdf(edges[i+1], mu_1, sigma_1) - p*lognormal_cdf(edges[i], mu_1, sigma_1);
+    theta[i] += (1-p)*lognormal_cdf(edges[i+1], mu_2, sigma_2) - (1-p)*lognormal_cdf(edges[i], mu_2, sigma_2);
+  }
+
+  theta[n] = 1 - sum(theta[1:(n-1)]);
+}
+model {
+    mu_1 ~ normal(prior_mu_1_mean, prior_mu_1_sigma);
+    mu_2 ~ normal(prior_mu_2_mean, prior_mu_2_sigma);
+  
+    sigma_1 ~ cauchy(0, 5);
+    sigma_2 ~ cauchy(0, 5);
+  
+    counts ~ multinomial(theta);
+}
+
+```
+
