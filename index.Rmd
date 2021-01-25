@@ -369,8 +369,20 @@ income_counts %>%
 
 # Extension Ideas
 
-- Regression and hierarchical regression
-- Simulation-Based Calibration (https://arxiv.org/abs/1804.06788)
-- Sensitivity analysis and diagnostics
-  - Model misspecification
-  - Competing model selection
+**Regression**
+
+A natural extension of this methodology is regression and using predictors to model $\boldsymbol{\phi}$, the parameterization of $f$. In the first example, if more is known about the types of tasks being worked on or if there are multiple teams/departments taking the survey (or both!) those can be used in a regression model to assess the effect of the type of task on the median time to completion. In the second example, if more is know about the survey responders, that data can be used to assess differences in median income across demographics.
+
+**Simulation-Based Calibration**
+
+The models in these examples (and any future extensions of this general approach) should be evaluated with Simulation-Based Calibration (SBC) to check whether they are well-calibrated with the respect to the specified priors.
+
+<aside>
+[Talts et al.](https://arxiv.org/abs/1804.06788)
+</aside>
+
+**Sensitivity Analysis**
+
+We were able to recover the truth in both examples -- which is great and promising -- but in the real world the truth isn't known and the assumptions in the model may not be correct. How well would the method work when the model is misspecified, e.g. if the data generating process uses a Gamma distribution but we still model with the log-normal?
+
+One potential approach is to perform [graphical posterior predictive checks](https://mc-stan.org/bayesplot/articles/graphical-ppcs.html) and compare each response interval's observed proportion with many proportions simulated from the posterior predictive distribution.

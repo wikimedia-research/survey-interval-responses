@@ -3004,16 +3004,17 @@ Figure 3: Cumulative distribution functions of latent distribution of task compl
 <h2 id="model-code-1">Model Code</h2>
 <h2 id="results-1">Results</h2>
 <h1 id="extension-ideas">Extension Ideas</h1>
-<ul>
-<li>Regression and hierarchical regression</li>
-<li>Simulation-Based Calibration (<a href="https://arxiv.org/abs/1804.06788" class="uri">https://arxiv.org/abs/1804.06788</a>)</li>
-<li>Sensitivity analysis and diagnostics
-<ul>
-<li>Model misspecification</li>
-<li>Competing model selection</li>
-</ul>
-<div class="sourceCode" id="cb2"><pre class="sourceCode r distill-force-highlighting-css"><code class="sourceCode r"></code></pre></div></li>
-</ul>
+<p><strong>Regression</strong></p>
+<p>A natural extension of this methodology is regression and using predictors to model <span class="math inline">\(\boldsymbol{\phi}\)</span>, the parameterization of <span class="math inline">\(f\)</span>. In the first example, if more is known about the types of tasks being worked on or if there are multiple teams/departments taking the survey (or both!) those can be used in a regression model to assess the effect of the type of task on the median time to completion. In the second example, if more is know about the survey responders, that data can be used to assess differences in median income across demographics.</p>
+<p><strong>Simulation-Based Calibration</strong></p>
+<p>The models in these examples (and any future extensions of this general approach) should be evaluated with Simulation-Based Calibration (SBC) to check whether they are well-calibrated with the respect to the specified priors.</p>
+<aside>
+<a href="https://arxiv.org/abs/1804.06788">Talts et al.</a>
+</aside>
+<p><strong>Sensitivity Analysis</strong></p>
+<p>We were able to recover the truth in both examples – which is great and promising – but in the real world the truth isn’t known and the assumptions in the model may not be correct. How well would the method work when the model is misspecified, e.g. if the data generating process uses a Gamma distribution but we still model with the log-normal?</p>
+<p>One potential approach is to perform <a href="https://mc-stan.org/bayesplot/articles/graphical-ppcs.html">graphical posterior predictive checks</a> and compare each response interval’s observed proportion with many proportions simulated from the posterior predictive distribution.</p>
+<div class="sourceCode" id="cb2"><pre class="sourceCode r distill-force-highlighting-css"><code class="sourceCode r"></code></pre></div>
 <!--radix_placeholder_article_footer-->
 <!--/radix_placeholder_article_footer-->
 </div>
