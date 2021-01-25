@@ -13,6 +13,7 @@ author:
     affiliation_url: https://wikimediafoundation.org/
 date: "`r Sys.Date()`"
 repository_url: https://github.com/wikimedia-research/survey-interval-responses
+creative_commons: CC BY
 output: distill::distill_article
 ---
 
