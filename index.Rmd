@@ -364,6 +364,93 @@ income_counts %>%
 
 ## Model Code
 
+
+
+```{cmdstan multinomial-mixture-model, output.var="multinomial_mixture_model", cache=TRUE}
+functions{
+    real F_cdf(real x, real p, real mu_1, real sigma_1, real mu_2, real sigma_2){
+        real mixture_1 = p*lognormal_cdf(x, mu_1, sigma_1);
+        real mixture_2 = (1-p)*lognormal_cdf(x, mu_2, sigma_2);
+
+        return mixture_1 + mixture_2;
+    }
+}
+data {
+  int<lower=1> n;
+  vector[n+1] edges; // always one more edge than counts
+  int counts[n];
+
+  real prior_mu_mean;
+  real prior_mu_sigma;
+
+  real prior_p_a;
+  real prior_p_b;
+}
+parameters {
+  ordered[2] mu_k;
+  real<lower=0> sigma[2];
+
+  real<lower=0, upper=1> p;
+}
+transformed parameters {
+  simplex[n] theta;
+
+  theta[1] = F_cdf(edges[2], p, mu_k[1], sigma[1], mu_k[2], sigma[2]);
+  for (i in 2:(n-1)) {
+    theta[i] = F_cdf(edges[i+1], p, mu_k[1], sigma[1], mu_k[2], sigma[2]) - F_cdf(edges[i], p, mu_k[1], sigma[1], mu_k[2], sigma[2]);
+  }
+
+  theta[n] = 1 - F_cdf(edges[n], p, mu_k[1], sigma[1], mu_k[2], sigma[2]);
+}
+model {
+    mu_k ~ normal(prior_mu_mean, prior_mu_sigma);
+    sigma ~ cauchy(0, 5);
+    p ~ beta(prior_p_a, prior_p_b);
+    counts ~ multinomial(theta);
+}
+generated quantities{
+    int yppc[size(counts)] = multinomial_rng(theta, sum(counts));
+}
+
+
+```
+
+```{r multinomial-mixture-samples}
+binned_incomes = sampled_incomes %>% 
+                 count(binned_income)
+
+counts = binned_incomes$n
+edges = c(0, 8e3, 1.5e4, 3e4, 6e4, 1e5, 2e5, 5e5, 1e6)/1e3 # In thousands.  Last element technically inf, but make finite to pass to Stan.  Stan doesn't use it.
+n = length(counts)
+
+model_data = list(
+  n = n, 
+  edges = edges,
+  counts = counts,
+  prior_mu_mean = 0,
+  prior_mu_sigma = 1,
+  prior_p_a = 1,
+  prior_p_b = 1
+)
+
+
+f = multinomial_mixture_model$sample(model_data, chains = 12, parallel_chains = 4, thin = 4)
+f$cmdstan_diagnose()
+
+r = rstan::read_stan_csv(f$output_files())
+
+np = bayesplot::nuts_params(r)
+
+
+bayesplot::mcmc_hist(r, pars = c('p'), np = np )
+bayesplot::mcmc_parcoord(r, regex_pars = 'mu', np = np )
+bayesplot::mcmc_parcoord(r, regex_pars = 'sigma', np = np )
+
+
+
+```
+
+
 ## Results
 
 # Extension Ideas
@@ -374,53 +461,4 @@ income_counts %>%
   - Model misspecification
   - Competing model selection
 =======
-
-
-
-```{cmdstan multinomial-mixture-model, output.var="multinomial_mixture_model", cache=TRUE}
-data {
-  int<lower=1> n;
-  vector[n+1] edges; // always one more edge than counts
-  int counts[n];
-
-  real prior_mu_1_mean;
-  real prior_mu_1_sigma;
-  
-  real prior_mu_2_mean;
-  real prior_mu_2_sigma;
-  
-  real prior_p_a;
-  real prior_p_b;
-}
-parameters {
-  real mu_1;
-  real<lower=0> sigma_1;
-  
-  real mu_2;
-  real<lower=0> sigma_2;
-  
-  real<lower=0, upper=1> p;
-}
-transformed parameters {
-  simplex[n] theta;
-
-  theta[1] = p*lognormal_cdf(edges[2], mu_1, sigma_1) + (1-p)*lognormal_cdf(edges[2], mu_1, sigma_1);
-  for (i in 2:(n-1)) {
-    theta[i] = p*lognormal_cdf(edges[i+1], mu_1, sigma_1) - p*lognormal_cdf(edges[i], mu_1, sigma_1);
-    theta[i] += (1-p)*lognormal_cdf(edges[i+1], mu_2, sigma_2) - (1-p)*lognormal_cdf(edges[i], mu_2, sigma_2);
-  }
-
-  theta[n] = 1 - sum(theta[1:(n-1)]);
-}
-model {
-    mu_1 ~ normal(prior_mu_1_mean, prior_mu_1_sigma);
-    mu_2 ~ normal(prior_mu_2_mean, prior_mu_2_sigma);
-  
-    sigma_1 ~ cauchy(0, 5);
-    sigma_2 ~ cauchy(0, 5);
-  
-    counts ~ multinomial(theta);
-}
-
-```
 

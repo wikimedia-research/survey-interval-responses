@@ -24,19 +24,19 @@ data {
 }
 parameters {
   ordered[2] mu_k;
-  real<lower=0> sigma;
+  real<lower=0> sigma[2];
 
   real<lower=0, upper=1> p;
 }
 transformed parameters {
   simplex[n] theta;
 
-  theta[1] = F_cdf(edges[2], p, mu_k[1], sigma, mu_k[2], sigma);
+  theta[1] = F_cdf(edges[2], p, mu_k[1], sigma[1], mu_k[2], sigma[2]);
   for (i in 2:(n-1)) {
-    theta[i] = F_cdf(edges[i+1], p, mu_k[1], sigma, mu_k[2], sigma) - F_cdf(edges[i], p, mu_k[1], sigma, mu_k[2], sigma);
+    theta[i] = F_cdf(edges[i+1], p, mu_k[1], sigma[1], mu_k[2], sigma[2]) - F_cdf(edges[i], p, mu_k[1], sigma[1], mu_k[2], sigma[2]);
   }
 
-  theta[n] = 1 - F_cdf(edges[n], p, mu_k[1], sigma, mu_k[2], sigma);
+  theta[n] = 1 - F_cdf(edges[n], p, mu_k[1], sigma[1], mu_k[2], sigma[2]);
 }
 model {
     mu_k ~ normal(prior_mu_mean, prior_mu_sigma);
@@ -52,9 +52,11 @@ generated quantities{
 }
 '
 ndraws = 1000
-samples_from_latent_dist = rnorm(1000, -2, 1)
-samples_from_mixture = as.logical(rbinom(1000, 2, 1))
-samples_from_latent_dist[samples_from_mixture] = rnorm(sum(samples_from_mixture), 2, 1)
+samples_from_latent_dist_1 = rnorm(1000, -2, 1)
+samples_from_latent_dist_2 = rnorm(1000, 2, 2)
+p = rbinom(1000, 1, 0.5)
+samples_from_latent_dist = p*samples_from_latent_dist_1 + (1-p)*samples_from_latent_dist_2
+hist(samples_from_latent_dist)
 
 mixture_bins = tibble(x = samples_from_latent_dist) %>%
     mutate(x2 = cut_width(x, 1)) %>%
