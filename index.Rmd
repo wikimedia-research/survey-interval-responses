@@ -1,7 +1,7 @@
 ---
 title: "Estimation with non-linearly scaled interval responses in surveys"
 description: >
-  If a survey question asks about how much time the responder took to complete a task -- with the latent quantity of interest being "median task completion time" -- presenting options such as "5-15 minutes" and "1-2 days" (instead of freeform text fields) reduces cognitive load and makes analysis simpler (survey taker does not have option to omit units when answering). The proposed methodology enables accurate inference on the quantity of interest given the survey responses in the form of intervals.
+  Surveys often present responders with answer options formatted as intervals/bins when asking sensitive questions, to preserve privacy, or to simplify cognitive load. Instead of asking for exact age, survey designer may ask for an age group; instead of asking for exact income, the designer may ask for a range; instead of asking how much time a task took, the options may be "5-15 minutes" and "1-2 days" to make it easier for the survey taker to answer the question and to make the analysis of responses easier. In this post we present a simple model which may be used to infer a latent, potentially skewed continuous distribution which can only be observed indirectly through discretized realizations.
 author:
   - name: Demetri Pananos
     url: https://dpananos.github.io/
@@ -29,12 +29,8 @@ We are then interested in performing inference on this _latent_ quantity of inte
 
 Furthermore, those bins may not be evenly spaced or sized. For example, income is almost always right-skewed -- with more people earning less money, and fewer people earning more. Similarly, task completion times may be right-skewed as well -- with most tasks being short and quick-to-complete, and only few tasks that take a really long time. So the methodology for analyzing this binned data must enable us to infer a distribution which may be skewed or symmetrical.
 
-In this post, we present a model and its extension -- and we demonstrate their applications through the following examples:
-
-1. Inferring the median task completion time based on an imaginary survey in which the non-linearly scaled options were:
+In this post, we present a model and its extension -- and we demonstrate their applications through the example of inferring the median task completion time based on an imaginary survey in which the non-linearly scaled options were:
 "0-5 minutes", "5-60 minutes", "1-6 hours", "6-12 hours", and "12-14 hours."
-2. Extending the model with mixtures of densities by inferring the median incomes of two different groups of people when no other information is provided, also through non-linearly scaled options --
-"0-8k", "8k-15k", "15k-30k", "30k-60k", "60k-100k", "100k-200k", "200k-500k", "More than 500k."
 
 # Model Derivation
 
@@ -76,9 +72,11 @@ time_scale_labeller <- function(x) {
 # time_scale_labeller(c(3600, 3660, 3661))
 ```
 
-# Example 1
+# Example
 
-This example is motivated by a real problem... Interested in the median task completion time based on an imaginary survey in which the non-linearly scaled options were: "0-5 minutes", "5-60 minutes", "1-6 hours", "6-12 hours", and "12-14 hours."
+This example is motivated by a real problem in which teams of data analysts and data scientists were surveyed on how much time it took them to complete requests. The survey designers were measuring time to delivery of requested data and/or actionable insights to stakeholders as part of an organizational goal to reduce the median time through improvements to tools and processes.
+
+Suppose we are interested in the median task completion time based on an imaginary survey in which the non-linearly, unevenly scaled options were: "0-5 minutes", "5-60 minutes", "1-6 hours", "6-12 hours", and "12-14 hours."
 
 ## Data Simulation
 
@@ -274,104 +272,19 @@ model_draws_tidy %>%
     )
 ```
 
-# Example 2
+# Further Work
 
-Suppose that in our survey of incomes, we only let responders pick the interval containing their actual income rather than asking for their exact income -- to preserve their privacy. As with the previous example our options are not evenly or linearly scaled: "0-8k", "8k-15k", "15k-30k", "30k-60k", "60k-100k", "100k-200k", "200k-500k", "More than 500k."
-
-Furthermore, in this example we believe that there are two groups of people who make up our sample: a group which tends to earn less on average and a group which tends to earn more on average. In this imaginary scenario no additional information was collected to inform group membership, so we must infer this additional quantity.
-
-## Model Extension
-
-## Data Simulation
-
-```{r group-params, cache=TRUE}
-n_groups <- 200 * c(a = 0.75, b = 0.25)
-group_params <- list(
-  a = list(n = n_groups["a"], mu = 9, sigma = 1),
-  b = list(n = n_groups["b"], mu = 11, sigma = 2)
-)
-```
-```{r sampled-incomes, dependson='group-params'}
-set.seed(401)
-sampled_incomes <- group_params %>%
-  map_dfr(~ tibble(income = rlnorm(.x[["n"]], .x[["mu"]], .x[["sigma"]])), .id = "group") %>%
-  mutate(
-    binned_income = cut(
-      income,
-      breaks = c(0, 8e3, 1.5e4, 3e4, 6e4, 1e5, 2e5, 5e5, Inf),
-      labels = c("Less than 8k", "8k-15k", "15k-30k", "30k-60k", "60k-100k", "100k-200k", "200k-500k", "More than 500k")
-    )
-  )
-sampled_incomes <- bind_rows(
-  sampled_incomes,
-  tibble(group = "both", select(sampled_incomes, income, binned_income))
-)
-```
-
-```{r, echo=FALSE}
-quantile_probs <- c(0, 0.1, 0.25, 0.5, 0.75, 0.9, 1.0)
-sampled_incomes %>%
-  summarize(
-    prob = quantile_probs,
-    qs = quantile(income, prob = quantile_probs),
-    .groups = "drop"
-  ) %>%
-  gt() %>%
-  fmt_percent(columns = vars(prob), decimals = 0) %>%
-  fmt_currency(columns = vars(qs)) %>%
-  cols_label(prob = "Probability", qs = "Quantile") %>%
-  tab_style(
-    style = cell_fill(color = "gray90"),
-    locations = cells_body(
-      rows = (1:length(quantile_probs) %% 2) == 1
-    )
-  )
-```
-
-```{r income-counts, layout="l-page", echo=FALSE}
-income_counts <- sampled_incomes %>%
-  count(group, binned_income) %>%
-  group_by(group) %>%
-  mutate(prop = n / sum(n)) %>%
-  ungroup %>%
-  pivot_wider(names_from = "group", values_from = c("n", "prop"), values_fill = 0)
-income_counts %>%
-  gt(rowname_col = "binned_income") %>%
-  fmt_percent(columns = starts_with("prop"), decimals = 1) %>%
-  cols_label(.list = setNames(
-    flatten_chr(map(c("Only A", "Only B", "Both (A & B)"), rep.int, times = 2)),
-    paste0(c("n_", "prop_"), flatten_chr(map(c("a", "b", "both"), rep.int, times = 2)))
-  )) %>%
-  cols_align("right", starts_with("n")) %>%
-  tab_spanner("Simulated responses", starts_with("n")) %>%
-  tab_spanner("Proportion of total", starts_with("prop")) %>%
-  cols_width(
-    starts_with("n") ~ px(150),
-    starts_with("prop") ~ px(150),
-    everything() ~ px(150)
-  ) %>%
-  tab_style(
-    style = cell_text(align = "right"),
-    locations = cells_column_labels(everything())
-  ) %>%
-  tab_style(
-    style = cell_fill(color = "gray90"),
-    locations = cells_body(
-      rows = (1:nrow(income_counts) %% 2) == 1
-    )
-  ) %>%
-  tab_header("Binned incomes")
-```
-
-## Model Code
-
-## Results
-
-# Extension Ideas
+If you're interested in extending this model or expanding on this work, we suggest looking into the following:
 
 **Regression**
 
-A natural extension of this methodology is regression and using predictors to model $\boldsymbol{\phi}$, the parameterization of $f$. In the first example, if more is known about the types of tasks being worked on or if there are multiple teams/departments taking the survey (or both!) those can be used in a regression model to assess the effect of the type of task on the median time to completion. In the second example, if more is know about the survey responders, that data can be used to assess differences in median income across demographics.
+A natural extension of this methodology is regression and using predictors to model $\boldsymbol{\phi}$, the parameterization of $f$. In the example, if more is known about the types of tasks being worked on, that data can be used in a regression model to assess the effect of the type of task on the median time to completion. If the counts are separated by teams within departments, this model can be extended to a hierarchical regression model.
+
+**Mixtures**
+
+Suppose that in a survey of incomes, we only let responders pick the interval containing their actual income rather than asking for their exact income -- to preserve their privacy and because this is a sensitive topic. As with the previous example our options are not evenly or linearly scaled: "0-8k", "8k-15k", "15k-30k", "30k-60k", "60k-100k", "100k-200k", "200k-500k", "More than 500k."
+
+Now, when such a survey is sent out suppose that there are two groups of people who make up the sample: a group which tends to earn less on average and a group which tends to earn more on average. In such a scenario no additional information was collected to inform group membership (or else we could use regression), so we must infer this additional quantity through a [mixture model](https://en.wikipedia.org/wiki/Mixture_distribution).
 
 **Simulation-Based Calibration**
 
